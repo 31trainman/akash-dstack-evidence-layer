@@ -1,0 +1,12 @@
+services:
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    environment:
+      BRIDGE_API_TOKEN: local-dev-token-change-me
+      ALLOW_TEST_EVIDENCE: "1"
+      ALLOW_TEST_GPU_EVIDENCE: "1"
+      CHALLENGE_TTL_SECONDS: "120"
+    ports:
+      - "8080:8080"
