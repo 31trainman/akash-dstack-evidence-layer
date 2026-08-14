@@ -1,0 +1,142 @@
+diff --git a/src/libs/protocols/protos/confidential_data_hub.proto b/src/libs/protocols/protos/confidential_data_hub.proto
+--- a/src/libs/protocols/protos/confidential_data_hub.proto
++++ b/src/libs/protocols/protos/confidential_data_hub.proto
+@@
+-message ImagePullResponse {}
++message ImagePullResponse {
++    // Digest of the manifest actually resolved and pulled by image-rs.
++    // This mirrors current confidential-containers/guest-components CDH API.
++    string manifest_digest = 1;
++}
+
+diff --git a/src/agent/src/confidential_data_hub/mod.rs b/src/agent/src/confidential_data_hub/mod.rs
+--- a/src/agent/src/confidential_data_hub/mod.rs
++++ b/src/agent/src/confidential_data_hub/mod.rs
+@@
+-    pub async fn pull_image(&self, image: &str, bundle_path: &str) -> Result<()> {
++    pub async fn pull_image(&self, image: &str, bundle_path: &str) -> Result<String> {
+@@
+-        let _ = self
++        let response = self
+             .image_pull_client
+@@
+             .await?;
+-
+-        Ok(())
++
++        if response.manifest_digest.is_empty() {
++            return Err(anyhow::anyhow!("CDH returned an empty manifest digest"));
++        }
++
++        Ok(response.manifest_digest)
+@@
+-pub async fn pull_image(image: &str, bundle_path: PathBuf) -> Result<String> {
++pub async fn pull_image(image: &str, bundle_path: PathBuf) -> Result<(String, String)> {
+@@
+-    cdh_client
++    let manifest_digest = cdh_client
+         .pull_image(image, bundle_path.to_string_lossy().as_ref())
+         .await?;
+
+     let image_bundle_path = scoped_join(&bundle_path, "rootfs")?;
+-    Ok(image_bundle_path.as_path().display().to_string())
++    Ok((image_bundle_path.as_path().display().to_string(), manifest_digest))
+ }
+
+diff --git a/src/agent/src/storage/mod.rs b/src/agent/src/storage/mod.rs
+--- a/src/agent/src/storage/mod.rs
++++ b/src/agent/src/storage/mod.rs
+@@
+ pub struct StorageContext<'a> {
+     cid: &'a Option<String>,
+     logger: &'a Logger,
+     sandbox: &'a Arc<Mutex<Sandbox>>,
++    image_manifest_digest: &'a mut Option<String>,
+ }
++
++#[derive(Debug, Default)]
++pub struct AddStoragesResult {
++    pub mounts: Vec<String>,
++    pub image_manifest_digest: Option<String>,
++}
+@@
+ pub async fn add_storages(
+@@
+-) -> Result<Vec<String>> {
++) -> Result<AddStoragesResult> {
+     let mut mount_list = Vec::new();
++    let mut image_manifest_digest = None;
+@@
+             let mut ctx = StorageContext {
+                 cid: &cid,
+                 logger: &logger,
+                 sandbox,
++                image_manifest_digest: &mut image_manifest_digest,
+             };
+@@
+-    Ok(mount_list)
++    Ok(AddStoragesResult {
++        mounts: mount_list,
++        image_manifest_digest,
++    })
+ }
+
+diff --git a/src/agent/src/storage/image_pull_handler.rs b/src/agent/src/storage/image_pull_handler.rs
+--- a/src/agent/src/storage/image_pull_handler.rs
++++ b/src/agent/src/storage/image_pull_handler.rs
+@@
+-        let bundle_path = match confidential_data_hub::pull_image(image_name, bundle_path).await {
+-            Ok(path) => {
++        let bundle_path = match confidential_data_hub::pull_image(image_name, bundle_path).await {
++            Ok((path, manifest_digest)) => {
++                *ctx.image_manifest_digest = Some(manifest_digest.clone());
+                 info!(
+                     ctx.logger,
+-                    "pull and unpack image {image_name}, cid: {cid} succeeded."
++                    "pull and unpack image {image_name}, cid: {cid} succeeded; manifest digest: {manifest_digest}."
+                 );
+                 path
+             }
+
+diff --git a/src/agent/src/rpc.rs b/src/agent/src/rpc.rs
+--- a/src/agent/src/rpc.rs
++++ b/src/agent/src/rpc.rs
+@@
+-        let m = add_storages(
++        let storage_result = add_storages(
+             sl(),
+             req.storages.clone(),
+             &self.sandbox,
+             Some(req.container_id),
+         )
+         .await?;
+@@
+-        s.container_mounts.insert(cid.clone(), m);
++        s.container_mounts
++            .insert(cid.clone(), storage_result.mounts);
+@@
+         append_guest_hooks(&s, &mut oci)?;
++
++        let resolved_config_digest = crate::workload_config_digest::config_digest(&oci)?;
++
++        // For guest-pull workloads this value is produced by image-rs from the
++        // manifest actually resolved/pulled in the confidential guest. It is
++        // not taken from the tenant's environment.
++        let image_manifest_digest = storage_result
++            .image_manifest_digest
++            .as_deref()
++            .ok_or_else(|| anyhow!("guest-pull workload did not produce a manifest digest"))?;
++
++        info!(
++            sl(),
++            "resolved workload identity";
++            "container-id" => &cid,
++            "image-manifest-digest" => image_manifest_digest,
++            "config-digest" => &resolved_config_digest,
++        );
++
++        // NEXT STEP: extend an Attestation Agent runtime-measurement event for
++        // config_digest (CDH already extends PullImage with manifest_digest),
++        // then bind both values to a verifier nonce + workload public key.
+
+         let olddir = setup_bundle(&cid, &mut oci)?;

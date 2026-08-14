@@ -1,0 +1,38 @@
+diff --git a/src/agent/src/main.rs b/src/agent/src/main.rs
+--- a/src/agent/src/main.rs
++++ b/src/agent/src/main.rs
+@@
++mod workload_config_digest;
+
+diff --git a/src/agent/src/rpc.rs b/src/agent/src/rpc.rs
+--- a/src/agent/src/rpc.rs
++++ b/src/agent/src/rpc.rs
+@@
+ use crate::version::{AGENT_VERSION, API_VERSION};
++use crate::workload_config_digest::config_digest;
+@@
+         update_container_namespaces(&s, &mut oci, use_sandbox_pidns)?;
+
+         // Append guest hooks
+         append_guest_hooks(&s, &mut oci)?;
+
++        // EXPERIMENTAL: derive a deterministic digest from the resolved OCI
++        // runtime state as seen by the measured kata-agent.
++        //
++        // This is deliberately placed AFTER Kata's in-guest device/CDI,
++        // namespace and hook mutations and BEFORE setup_bundle/CreateOpts.
++        //
++        // NOTE: logging the digest is only a bring-up mechanism. Production
++        // code must bind this digest to a fresh attestation challenge and
++        // workload public key; the verifier must never trust the log itself.
++        let resolved_config_digest = config_digest(&oci)?;
++        info!(
++            sl(),
++            "resolved workload config digest";
++            "container-id" => &cid,
++            "config-digest" => &resolved_config_digest,
++        );
++
+         // write spec to bundle path, hooks might
+         // read ocispec
+         let olddir = setup_bundle(&cid, &mut oci)?;

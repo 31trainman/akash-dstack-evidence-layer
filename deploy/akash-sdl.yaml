@@ -1,0 +1,47 @@
+---
+version: "2.1"
+
+services:
+  dstack-bridge:
+    image: ghcr.io/31trainman/akash-dstack-evidence-layer@sha256:53fb7790a35520733f3e913d423cd5549c18fb73d149786538d689932a4e8bac
+    env:
+      - CONFIG_ID=akash-dstack-poc-v0.3
+      - IMAGE_ID=ghcr.io/31trainman/akash-dstack-evidence-layer@sha256:53fb7790a35520733f3e913d423cd5549c18fb73d149786538d689932a4e8bac
+    expose:
+      - port: 8080
+        as: 80
+        to:
+          - global: true
+    params:
+      tee: cpu-gpu
+
+profiles:
+  compute:
+    dstack-bridge:
+      resources:
+        cpu:
+          units: 1
+        memory:
+          size: 1Gi
+        storage:
+          size: 2Gi
+        gpu:
+          units: 1
+          attributes:
+            vendor:
+              nvidia:
+                - model: pro6000se
+                  ram: 96Gi
+                  interface: pcie
+  placement:
+    tee-provider:
+      pricing:
+        dstack-bridge:
+          denom: uact
+          amount: 10000
+
+deployment:
+  dstack-bridge:
+    tee-provider:
+      profile: dstack-bridge
+      count: 1
