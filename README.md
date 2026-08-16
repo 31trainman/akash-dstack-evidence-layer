@@ -51,4 +51,4 @@ Do not commit real attestation evidence, private keys, seed phrases, API keys, K
 
 ## License
 
-Apache-2.0. Keep the `LICENSE` file already created in the GitHub repository.
+Apache-2.0.
