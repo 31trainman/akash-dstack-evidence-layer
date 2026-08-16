@@ -12,3 +12,7 @@ Changes:
 The next live milestone is a real AES-provider deployment where Trustee validates a fresh SNP report whose REPORT_DATA is bound to our workload commitment.
 
 TDX support can be added later without changing the workload-binding layer.
+
+## License
+
+License: Apache-2.0
