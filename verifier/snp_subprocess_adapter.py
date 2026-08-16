@@ -1,4 +1,5 @@
 import json
+import math
 import subprocess
 import tempfile
 from pathlib import Path
@@ -17,8 +18,11 @@ class RealSnpVerifierAdapter:
       akash-coco-snp-adapter <evidence.json> <expected-report-data-hex>
     """
 
-    def __init__(self, verifier_binary: str):
+    def __init__(self, verifier_binary: str, timeout_seconds: float = 10):
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0 or timeout_seconds > 60:
+            raise ValueError("SNP verifier timeout must be greater than 0 and at most 60 seconds")
         self.verifier_binary = verifier_binary
+        self.timeout_seconds = timeout_seconds
 
     def verify(self, evidence: AkashSnpEvidence, expected_report_data: bytes) -> HardwareResult:
         if len(expected_report_data) > 64:
@@ -34,15 +38,19 @@ class RealSnpVerifierAdapter:
             p = Path(td) / "akash-attestation.json"
             p.write_text(json.dumps(payload), encoding="utf-8")
 
-            proc = subprocess.run(
-                [
-                    self.verifier_binary,
-                    str(p),
-                    expected_report_data.hex(),
-                ],
-                capture_output=True,
-                text=True,
-            )
+            try:
+                proc = subprocess.run(
+                    [
+                        self.verifier_binary,
+                        str(p),
+                        expected_report_data.hex(),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout_seconds,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise PermissionError("real SNP verification timed out") from exc
 
         if proc.returncode != 0:
             raise PermissionError(

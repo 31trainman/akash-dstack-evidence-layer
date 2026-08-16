@@ -1,0 +1,72 @@
+---
+# v1.4 first-live-deployment architecture:
+#
+#   Akash confidential guest
+#     -> external trusted evidence bridge/verifier
+#     -> Trustee-backed SNP verification
+#     -> VerifiedWorkload
+#     -> KMS
+#
+# The security-decision bridge is deliberately NOT deployed on the Akash
+# provider. Replace all REPLACE_* values through deployment tooling; never
+# commit real credentials.
+#
+# BRIDGE_API_TOKEN is API access control only. It is visible to the Akash
+# provider and MUST NOT be treated as provider-resistant workload identity.
+# Provider-resistant identity is the attested ephemeral workload key bound
+# into the workload commitment.
+version: "2.1"
+
+services:
+  evidence-guest:
+    image: ghcr.io/31trainman/akash-dstack-evidence-guest@sha256:REPLACE_WITH_GUEST_DIGEST
+    env:
+      - BRIDGE_URL=https://REPLACE_WITH_EXTERNAL_VERIFIER_ENDPOINT
+      - BRIDGE_API_TOKEN=REPLACE_WITH_API_ACCESS_TOKEN
+      - IMAGE_MANIFEST_DIGEST=sha256:REPLACE_WITH_64_HEX_GUEST_IMAGE_DIGEST
+      - RESOLVED_CONFIG_DIGEST=sha256:REPLACE_WITH_64_HEX_RESOLVED_CONFIG_DIGEST
+      - AKASH_ATTESTATION_SIDECAR=http://127.0.0.1:8790
+    # Akash SDL requires a global exposure. This endpoint is not an
+    # authentication channel or input to the evidence/KMS trust decision.
+    expose:
+      - port: 8080
+        as: 80
+        proto: tcp
+        to:
+          - global: true
+    # Akash currently expresses confidential CPU+GPU capability as cpu-gpu,
+    # which may resolve to SNP or TDX. This first v1.4 live path is SNP-only:
+    # the guest and external verifier reject TDX evidence fail-closed.
+    params:
+      tee: cpu-gpu
+
+profiles:
+  compute:
+    evidence-guest:
+      resources:
+        cpu:
+          units: 1
+        memory:
+          size: 1Gi
+        storage:
+          size: 2Gi
+        gpu:
+          units: 1
+          attributes:
+            vendor:
+              nvidia:
+                - model: pro6000se
+                  ram: 96Gi
+                  interface: pcie
+  placement:
+    tee-provider:
+      pricing:
+        evidence-guest:
+          denom: uact
+          amount: 10000
+
+deployment:
+  evidence-guest:
+    tee-provider:
+      profile: evidence-guest
+      count: 1

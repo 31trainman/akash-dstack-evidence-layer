@@ -1,4 +1,6 @@
 ---
+# LEGACY v0.3 single-service SDL. Retained for historical review.
+# Use akash-sdl-v1.4-bridge-guest.yaml for the v1.4 architecture example.
 version: "2.1"
 
 services:

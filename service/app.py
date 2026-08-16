@@ -3,12 +3,13 @@ from fastapi import FastAPI,Header,HTTPException
 from service.auth import verify_bearer
 from service.models import ChallengeRequest,ChallengeResponse,AttestationSubmission,VerifiedWorkloadResponse
 from service.state import ChallengeStore
-from service.verify import validate_sha256,verify_with_real_or_fixture
+from service.verify import test_evidence_enabled,validate_sha256,verify_with_real_or_fixture
 from verifier.commitment import workload_commitment
-app=FastAPI(title='Akash-dstack Evidence Bridge',version='1.3')
+from verifier.policy import load_workload_policy
+app=FastAPI(title='Akash-dstack Evidence Bridge',version='1.4')
 store=ChallengeStore(int(os.environ.get('CHALLENGE_TTL_SECONDS','120')))
 @app.get('/healthz')
-def healthz(): return {'ok':True,'version':'1.3'}
+def healthz(): return {'ok':True,'version':'1.4'}
 @app.post('/v1/challenge',response_model=ChallengeResponse)
 def issue_challenge(req:ChallengeRequest,authorization:str|None=Header(default=None)):
     try: verify_bearer(authorization)
@@ -22,6 +23,8 @@ def attest(sub:AttestationSubmission,authorization:str|None=Header(default=None)
         nonce=base64.b64decode(sub.nonce_b64,validate=True); pubkey=base64.b64decode(sub.workload_pubkey_b64,validate=True)
         validate_sha256('image_manifest_digest',sub.image_manifest_digest); validate_sha256('config_digest',sub.config_digest)
         r=store.consume(sub.challenge_id,nonce)
+        policy=load_workload_policy(r.policy_id)
+        policy.check(sub.image_manifest_digest,sub.config_digest)
         c=workload_commitment(pubkey,sub.image_manifest_digest,sub.config_digest,nonce)
         if sub.tee_platform not in {'snp','snp-gpu'}:
             raise PermissionError(f'unsupported CPU TEE for v1.4 live path: {sub.tee_platform}')
@@ -29,7 +32,7 @@ def attest(sub:AttestationSubmission,authorization:str|None=Header(default=None)
         gpu_verified=False
         if r.require_gpu:
             if not sub.gpu_reports: raise PermissionError('GPU evidence required by challenge policy')
-            if os.environ.get('ALLOW_TEST_GPU_EVIDENCE')=='1': gpu_verified=True
+            if test_evidence_enabled('ALLOW_TEST_GPU_EVIDENCE'): gpu_verified=True
             else: raise PermissionError('real NVIDIA verifier not configured')
         if not cpu_verified: raise PermissionError('CPU verification failed')
         return VerifiedWorkloadResponse(verified=True,challenge_id=r.challenge_id,image_manifest_digest=sub.image_manifest_digest,config_digest=sub.config_digest,cpu_verified=True,gpu_verified=gpu_verified,commitment_hex=c.hex())
