@@ -1,0 +1,43 @@
+---
+version: "2.1"
+services:
+  evidence-guest:
+    image: ghcr.io/31trainman/akash-dstack-evidence-bridge@sha256:REPLACE_WITH_V1_2_DIGEST
+    env:
+      - BRIDGE_URL=https://YOUR_VERIFIER_ENDPOINT
+    expose:
+      - port: 8080
+        as: 80
+        to:
+          - global: true
+    params:
+      tee: cpu-gpu
+profiles:
+  compute:
+    evidence-guest:
+      resources:
+        cpu:
+          units: 1
+        memory:
+          size: 1Gi
+        storage:
+          size: 2Gi
+        gpu:
+          units: 1
+          attributes:
+            vendor:
+              nvidia:
+                - model: pro6000se
+                  ram: 96Gi
+                  interface: pcie
+  placement:
+    tee-provider:
+      pricing:
+        evidence-guest:
+          denom: uact
+          amount: 10000
+deployment:
+  evidence-guest:
+    tee-provider:
+      profile: evidence-guest
+      count: 1

@@ -1,0 +1,19 @@
+syntax = "proto3";
+package akash_dstack;
+
+// Prototype challenge supplied by an external verifier/KMS.
+// In production this request must arrive over an authenticated channel and be
+// associated with a single secret-release transaction.
+message WorkloadEvidenceChallenge {
+    bytes workload_pubkey = 1;
+    bytes verifier_nonce = 2;
+}
+
+message WorkloadEvidenceResponse {
+    string image_manifest_digest = 1;
+    string config_digest = 2;
+    bytes workload_pubkey = 3;
+    bytes verifier_nonce = 4;
+    bytes commitment = 5;
+    bytes tee_evidence = 6;
+}

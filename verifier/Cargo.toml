@@ -1,0 +1,19 @@
+[package]
+name = "akash-coco-snp-adapter"
+version = "0.8.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# Pin to the Trustee revision inspected for this prototype.
+verifier = { git = "https://github.com/confidential-containers/trustee", rev = "f8761b823952f71db40dd6b53050f3fd008c9758", package = "verifier", default-features = false, features = ["snp-verifier"] }
+
+# Used only to parse Akash sidecar raw SNP report bytes into the same
+# AttestationReport representation Trustee verifies.
+sev = { version = "7", default-features = false, features = ["openssl", "snp", "serde"] }
