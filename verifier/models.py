@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Optional
 
 @dataclass
@@ -29,10 +30,32 @@ class AkashSnpEvidence:
     cert_chain: str = ""
     tee_platform: str = "snp-gpu"
 
-@dataclass
-class HardwareResult:
-    verified: bool
-    claims: dict[str, Any] = field(default_factory=dict)
+class SnpTee(str, Enum):
+    SEV_SNP = "sev-snp"
+
+
+class SnpVerificationProfile(str, Enum):
+    TRUSTEE_SEV_SNP_V1 = "trustee-sev-snp-v1"
+
+
+class ReportDataBinding(str, Enum):
+    VERIFIED = "verified"
+
+
+@dataclass(frozen=True)
+class SnpVerifierMetadata:
+    verifier: str
+    protocol: str
+
+
+@dataclass(frozen=True)
+class VerifiedSnpResult:
+    """Success-only normalized result from the packaged Rust verifier."""
+
+    tee: SnpTee
+    verification_profile: SnpVerificationProfile
+    report_data_binding: ReportDataBinding
+    metadata: SnpVerifierMetadata
 
 @dataclass
 class EvidenceBundle:

@@ -1,19 +1,19 @@
 [package]
-name = "akash-coco-snp-adapter"
-version = "0.8.0"
+name = "akash-coco-snp-verifier"
+version = "1.0.0"
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
-anyhow = "1"
 base64 = "0.22"
 hex = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-
-# Pin to the Trustee revision inspected for this prototype.
 verifier = { git = "https://github.com/confidential-containers/trustee", rev = "f8761b823952f71db40dd6b53050f3fd008c9758", package = "verifier", default-features = false, features = ["snp-verifier"] }
-
-# Used only to parse Akash sidecar raw SNP report bytes into the same
-# AttestationReport representation Trustee verifies.
 sev = { version = "7", default-features = false, features = ["openssl", "snp", "serde"] }
+
+[patch.crates-io]
+# Trustee's pinned workspace carries this same patch because sev 7.1.0 does
+# not build with the combined sev + serde feature set.
+sev = { git = "https://github.com/virtee/sev", rev = "d487809188c3c92e397bc92e2cb2a85eb982c980" }

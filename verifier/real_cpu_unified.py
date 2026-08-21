@@ -14,6 +14,10 @@ class RealCpuUnifiedVerifier:
         if bundle.snp is None: raise PermissionError("SNP evidence missing")
         c=workload_commitment(bundle.workload_pubkey,bundle.image_digest,bundle.config_digest,bundle.nonce)
         hw=self.snp_verifier.verify(bundle.snp,c)
-        if not hw.verified: raise PermissionError("SNP hardware verification did not succeed")
         self.policy.check(bundle.image_digest,bundle.config_digest)
-        return VerifiedWorkload(challenge.challenge_id,bundle.nonce,bundle.workload_pubkey,bundle.image_digest,bundle.config_digest,True,False,{"cpu":hw.claims},c)
+        claims={"cpu":{
+            "tee":hw.tee.value,
+            "verification_profile":hw.verification_profile.value,
+            "report_data_binding":hw.report_data_binding.value,
+        }}
+        return VerifiedWorkload(challenge.challenge_id,bundle.nonce,bundle.workload_pubkey,bundle.image_digest,bundle.config_digest,True,False,claims,c)

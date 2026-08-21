@@ -2,13 +2,15 @@ name: Build evidence images
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/rust-python-trust-boundary
   pull_request:
     branches:
       - main
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   test-and-build:
@@ -17,37 +19,91 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up Rust 1.89
+        uses: dtolnay/rust-toolchain@1.89.0
+
+      - name: Build locked Rust verifier
+        run: cargo build --locked --manifest-path rust-verifier/Cargo.toml
+
+      - name: Run all locked Rust tests
+        run: cargo test --locked --manifest-path rust-verifier/Cargo.toml
+
+      - name: Run real Trustee SEV-SNP REPORT_DATA fixture
+        run: >-
+          cargo test --locked --manifest-path rust-verifier/Cargo.toml
+          --test trustee_report_data
+          trustee_proves_exact_32_byte_report_data_semantics
+          -- --exact --nocapture
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt PyYAML==6.0.2
 
-      - name: Run unit tests
+      - name: Run full Python test suite
         run: python -m unittest discover -s tests -v
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compile Python sources
+        run: python -m compileall -q service verifier tests
 
-      - name: Build and push bridge image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.bridge
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/akash-dstack-evidence-bridge:${{ github.sha }}
+      - name: Validate all Akash YAML
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
 
-      - name: Build and push guest image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.guest
-          push: true
-          tags: ghcr.io/${{ github.repository_owner }}/akash-dstack-evidence-guest:${{ github.sha }}
+          files = [Path("deploy.yaml"), *sorted(Path("deploy").glob("*.yaml"))]
+          for path in files:
+              yaml.safe_load(path.read_text(encoding="utf-8"))
+              print(f"parsed {path}")
+          print(f"parsed {len(files)} Akash YAML files")
+          PY
+
+      - name: Check patch whitespace
+        run: |
+          git diff --check
+          git diff --check HEAD^ HEAD
+
+      - name: Build bridge image
+        run: docker build --file Dockerfile.bridge --tag akash-dstack-evidence-bridge:ci .
+
+      - name: Build guest image
+        run: docker build --file Dockerfile.guest --tag akash-dstack-evidence-guest:ci .
+
+      - name: Verify packaged Rust verifier protocol
+        run: |
+          docker run --rm --entrypoint python akash-dstack-evidence-bridge:ci -c '
+          import json, os, subprocess
+          binary = "/usr/local/bin/akash-coco-snp-verifier"
+          assert os.path.isfile(binary) and os.access(binary, os.X_OK)
+          request = {
+              "protocol_version": 0,
+              "evidence_type": "sev-snp",
+              "evidence": {"report_b64": "AA==", "cert_chain": ""},
+              "expected_workload_commitment_hex": "00" * 32,
+              "expected_init_data_hash_hex": None,
+          }
+          result = subprocess.run(
+              [binary],
+              input=json.dumps(request, separators=(",", ":")).encode("ascii"),
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+              timeout=10,
+              check=False,
+          )
+          assert result.returncode == 1, result.returncode
+          assert result.stderr == b"", result.stderr
+          assert 0 < len(result.stdout) <= 4096, len(result.stdout)
+          response = json.loads(result.stdout)
+          assert response["protocol_version"] == 1, response
+          assert response["outcome"] == "error", response
+          assert response["error"]["category"] == "InvalidInput", response
+          assert response["error"]["code"] == "E_INVALID_INPUT", response
+          '

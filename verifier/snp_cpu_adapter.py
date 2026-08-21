@@ -9,8 +9,12 @@ class SnpCpuAdapter(CpuAdapter):
     def verify(self, evidence: AkashSnpEvidence, expected_commitment: bytes) -> CpuClaims:
         result = self.inner.verify(evidence, expected_commitment)
         return CpuClaims(
-            verified=result.verified,
+            verified=True,
             tee="snp",
-            binding_verified=result.verified,
-            claims=result.claims,
+            binding_verified=True,
+            claims={
+                "tee": result.tee.value,
+                "verification_profile": result.verification_profile.value,
+                "report_data_binding": result.report_data_binding.value,
+            },
         )

@@ -1,6 +1,5 @@
 import base64
 import json
-import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -15,9 +14,18 @@ from service.verify import (
     verify_with_real_or_fixture,
 )
 from verifier.commitment import workload_commitment
-from verifier.models import AkashSnpEvidence
+from verifier.models import (
+    AkashSnpEvidence,
+    ReportDataBinding,
+    SnpTee,
+    SnpVerificationProfile,
+)
 from verifier.policy import load_workload_policy
-from verifier.snp_subprocess_adapter import RealSnpVerifierAdapter
+from verifier.snp_subprocess_adapter import (
+    RealSnpVerifierAdapter,
+    SnpVerificationError,
+    VerificationFailureCategory,
+)
 
 
 IMAGE = "sha256:" + "11" * 32
@@ -116,9 +124,8 @@ class TestEvidenceModeTests(unittest.TestCase):
         with patch.dict(
             "os.environ", {"APP_ENV": "local", "ALLOW_TEST_EVIDENCE": "1"}, clear=True
         ):
-            verified, claims = verify_with_real_or_fixture(report, "", "snp", commitment)
-        self.assertTrue(verified)
-        self.assertTrue(claims["test_evidence"])
+            result = verify_with_real_or_fixture(report, "", "snp", commitment)
+        self.assertIsNone(result)
 
     def test_gpu_fixture_requires_local_mode_and_its_own_toggle(self):
         cases = [
@@ -149,18 +156,31 @@ class SnpVerifierTimeoutTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     snp_verifier_timeout_seconds()
 
-    @patch("verifier.snp_subprocess_adapter.subprocess.run")
+    @patch("verifier.snp_subprocess_adapter._run_bounded")
     def test_real_verifier_receives_timeout(self, run):
-        run.return_value = subprocess.CompletedProcess([], 0, "verified", "")
-        adapter = RealSnpVerifierAdapter("verifier", timeout_seconds=7)
+        run.return_value = (
+            0,
+            b'{"protocol_version":1,"outcome":"verified","security":{"tee":"sev-snp","verification_profile":"trustee-sev-snp-v1","report_data_binding":"verified"},"metadata":{"verifier":"confidential-containers-trustee","protocol":"akash-dstack-rust-verifier-v1"}}',
+            b"",
+        )
+        adapter = RealSnpVerifierAdapter(
+            ("verifier",), timeout_seconds=7, allow_local_override=True
+        )
         result = adapter.verify(AkashSnpEvidence("report"), b"C" * 32)
-        self.assertTrue(result.verified)
-        self.assertEqual(run.call_args.kwargs["timeout"], 7)
+        self.assertEqual(result.tee, SnpTee.SEV_SNP)
+        self.assertEqual(
+            result.verification_profile, SnpVerificationProfile.TRUSTEE_SEV_SNP_V1
+        )
+        self.assertEqual(result.report_data_binding, ReportDataBinding.VERIFIED)
+        self.assertEqual(run.call_args.args[2], 7)
 
-    @patch("verifier.snp_subprocess_adapter.subprocess.run")
+    @patch("verifier.snp_subprocess_adapter._run_bounded")
     def test_real_verifier_timeout_fails_closed(self, run):
-        run.side_effect = subprocess.TimeoutExpired("verifier", 10)
-        adapter = RealSnpVerifierAdapter("verifier")
+        run.side_effect = SnpVerificationError(
+            VerificationFailureCategory.VERIFICATION_FAILED,
+            "real SNP verification timed out",
+        )
+        adapter = RealSnpVerifierAdapter(("verifier",), allow_local_override=True)
         with self.assertRaisesRegex(PermissionError, "timed out"):
             adapter.verify(AkashSnpEvidence("report"), b"C" * 32)
 

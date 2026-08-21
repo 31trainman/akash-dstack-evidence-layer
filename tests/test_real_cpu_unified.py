@@ -1,10 +1,31 @@
 import unittest
-from verifier.models import Challenge, EvidenceBundle, AkashSnpEvidence
+from verifier.models import (
+    Challenge,
+    EvidenceBundle,
+    AkashSnpEvidence,
+    ReportDataBinding,
+    SnpTee,
+    SnpVerificationProfile,
+    SnpVerifierMetadata,
+    VerifiedSnpResult,
+)
 from verifier.commitment import workload_commitment
-from verifier.snp_subprocess_adapter import FakeSnpVerifierAdapter
 from verifier.policy import WorkloadPolicy
 from verifier.real_cpu_unified import RealCpuUnifiedVerifier
 IMAGE="sha256:"+"11"*32; CONFIG="sha256:"+"22"*32; PUBKEY=bytes(range(32)); NONCE=b"N"*32; CID="c1"
+
+class FakeSnpVerifierAdapter:
+    """Test-local success-only fake; not importable by production code."""
+    def verify(self, evidence, expected_report_data):
+        if evidence.report_b64 != expected_report_data.hex():
+            raise PermissionError("fake SNP evidence mismatch")
+        return VerifiedSnpResult(
+            SnpTee.SEV_SNP,
+            SnpVerificationProfile.TRUSTEE_SEV_SNP_V1,
+            ReportDataBinding.VERIFIED,
+            SnpVerifierMetadata("test-only", "test-only"),
+        )
+
 class Tests(unittest.TestCase):
     def make_bundle(self,pubkey=PUBKEY,image=IMAGE,config=CONFIG,nonce=NONCE):
         c=workload_commitment(pubkey,image,config,nonce); ev=AkashSnpEvidence(report_b64=c.hex())
