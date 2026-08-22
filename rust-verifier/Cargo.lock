@@ -9,9 +9,11 @@ dependencies = [
  "base64 0.22.1",
  "hex",
  "http-cache-reqwest",
+ "reqwest",
  "serde",
  "serde_json",
  "sev",
+ "sha2 0.10.9",
  "tokio",
  "verifier",
 ]
