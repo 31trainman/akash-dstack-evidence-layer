@@ -1,0 +1,43 @@
+name: SNP production readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  normal-validation:
+    name: Require all normal CI gates
+    uses: ./.github/workflows/build-images.yml
+
+  production-readiness:
+    name: Require genuine current SNP evidence
+    needs: normal-validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust 1.89
+        uses: dtolnay/rust-toolchain@1.89.0
+
+      - name: Fail closed when current fixture is absent
+        shell: bash
+        run: |
+          fixture=rust-verifier/tests/fixtures/snp-v3-current
+          required=(report.bin vcek.der amd-cert-chain.pem metadata.json SHA256SUMS README.md)
+          for file in "${required[@]}"; do
+            test -f "${fixture}/${file}" || {
+              echo "Missing required genuine fixture file: ${fixture}/${file}" >&2
+              exit 1
+            }
+          done
+
+      - name: Verify provenance, hashes, exact binding, and mutation rejection
+        run: rust-verifier/scripts/validate-snp-fixture.sh
+
+      - name: Record production-readiness result
+        run: |
+          echo "### SNP production-readiness gate satisfied" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Normal CI and genuine current-fixture validation both passed." >> "${GITHUB_STEP_SUMMARY}"

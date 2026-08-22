@@ -1,6 +1,5 @@
 #[cfg(target_os = "linux")]
 mod linux_capture {
-    use base64::{engine::general_purpose::STANDARD as B64, Engine};
     use reqwest::Client;
     use serde_json::json;
     use sev::{

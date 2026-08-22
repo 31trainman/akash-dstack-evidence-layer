@@ -1,6 +1,7 @@
 name: Build evidence images
 
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches:
@@ -28,15 +29,8 @@ jobs:
       - name: Build locked Rust verifier
         run: cargo build --locked --manifest-path rust-verifier/Cargo.toml
 
-      - name: Run all locked Rust tests
+      - name: Run all non-hardware locked Rust tests
         run: cargo test --locked --manifest-path rust-verifier/Cargo.toml
-
-      - name: Run real Trustee SEV-SNP REPORT_DATA fixture
-        run: >-
-          cargo test --locked --manifest-path rust-verifier/Cargo.toml
-          --test trustee_report_data
-          trustee_proves_exact_32_byte_report_data_semantics
-          -- --exact --nocapture
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -107,3 +101,50 @@ jobs:
           assert response["error"]["category"] == "InvalidInput", response
           assert response["error"]["code"] == "E_INVALID_INPUT", response
           '
+
+  detect-current-snp-fixture:
+    name: Detect genuine current SNP fixture
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.fixture.outputs.present }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Report fixture status
+        id: fixture
+        shell: bash
+        run: |
+          fixture=rust-verifier/tests/fixtures/snp-v3-current
+          required=(report.bin vcek.der amd-cert-chain.pem metadata.json SHA256SUMS README.md)
+          missing=()
+          for file in "${required[@]}"; do
+            test -f "${fixture}/${file}" || missing+=("${file}")
+          done
+          if ((${#missing[@]})); then
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            echo "### SNP production readiness: NOT SATISFIED" >> "${GITHUB_STEP_SUMMARY}"
+            echo "Genuine current fixture files are absent: ${missing[*]}" >> "${GITHUB_STEP_SUMMARY}"
+            echo "Normal CI may pass, but that does not establish SNP production readiness." >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+            echo "### Current SNP fixture detected" >> "${GITHUB_STEP_SUMMARY}"
+            echo "The separate cryptographic fixture job must pass before readiness can be claimed." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+  current-snp-fixture-validation:
+    name: SNP production fixture (skipped = NOT SATISFIED)
+    needs:
+      - test-and-build
+      - detect-current-snp-fixture
+    if: needs.detect-current-snp-fixture.outputs.present == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust 1.89
+        uses: dtolnay/rust-toolchain@1.89.0
+
+      - name: Validate captured evidence through pinned Trustee
+        run: rust-verifier/scripts/validate-snp-fixture.sh

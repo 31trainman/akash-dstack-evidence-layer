@@ -55,3 +55,12 @@ rust-verifier/scripts/validate-snp-fixture.sh
 The fixture is not acceptable for production-readiness claims unless exact
 commitment verification succeeds and a one-bit expected-commitment mutation
 fails through the pinned Trustee evaluator.
+
+The normal `Build evidence images` workflow validates all non-hardware gates.
+When this fixture is absent, its `SNP production fixture` job is visibly
+skipped and the workflow summary says production readiness is not satisfied.
+A normal green workflow therefore does not establish SNP production readiness.
+
+The separate manually dispatched `SNP production readiness` workflow fails
+closed unless every fixture/provenance file exists, hashes validate, the exact
+commitment succeeds, the one-bit mutation fails, and normal CI also passes.
