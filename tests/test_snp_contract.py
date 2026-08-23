@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from verifier.models import AkashSnpEvidence
+from verifier.models import VerifiedSnpResult
 from verifier.snp_subprocess_adapter import (
     MAX_STDERR_BYTES,
     MAX_STDOUT_BYTES,
@@ -44,6 +45,19 @@ class SnpProtocolTests(unittest.TestCase):
     def verify(self, adapter):
         return adapter.verify(AkashSnpEvidence("report"), b"C" * 32)
 
+    def assert_fake_response_fails_closed(self, output, exit_code=0):
+        source = (
+            "import sys;sys.stdin.buffer.read();"
+            f"sys.stdout.write({output!r});raise SystemExit({exit_code})"
+        )
+        with patch(
+            "verifier.snp_subprocess_adapter.VerifiedSnpResult",
+            wraps=VerifiedSnpResult,
+        ) as verified_result:
+            with self.assertRaises(SnpVerificationError):
+                self.verify(adapter_for(source))
+            verified_result.assert_not_called()
+
     def test_only_strict_normalized_success_is_accepted(self):
         source = f"import sys;sys.stdin.buffer.read();sys.stdout.write({json.dumps(json.dumps(SUCCESS))})"
         result = self.verify(adapter_for(source))
@@ -56,20 +70,62 @@ class SnpProtocolTests(unittest.TestCase):
             RealSnpVerifierAdapter((sys.executable,))
         RealSnpVerifierAdapter((PACKAGED_SNP_VERIFIER,))
 
-    def test_exit_zero_malformed_or_extra_output_fails_closed(self):
-        outputs = [
-            "",
-            "not-json",
-            json.dumps(SUCCESS) + "trailing",
-            " " + json.dumps(SUCCESS),
-            json.dumps({**SUCCESS, "extra": True}),
-            '{"protocol_version":1,"protocol_version":1,"outcome":"verified"}',
-        ]
-        for output in outputs:
-            with self.subTest(output=output):
-                source = f"import sys;sys.stdin.buffer.read();sys.stdout.write({output!r})"
-                with self.assertRaises(SnpVerificationError):
-                    self.verify(adapter_for(source))
+    def test_exit_zero_empty_stdout_fails_closed(self):
+        self.assert_fake_response_fails_closed("")
+
+    def test_exit_zero_malformed_json_fails_closed(self):
+        self.assert_fake_response_fails_closed("{")
+
+    def test_exit_zero_duplicate_json_keys_fail_closed(self):
+        output = json.dumps(SUCCESS, separators=(",", ":")).replace(
+            '"protocol_version":1',
+            '"protocol_version":1,"protocol_version":1',
+            1,
+        )
+        self.assert_fake_response_fails_closed(output)
+
+    def test_exit_zero_multiple_json_documents_fail_closed(self):
+        document = json.dumps(SUCCESS, separators=(",", ":"))
+        self.assert_fake_response_fails_closed(document + "\n" + document)
+
+    def test_exit_zero_success_plus_trailing_text_fails_closed(self):
+        self.assert_fake_response_fails_closed(json.dumps(SUCCESS) + "trailing")
+
+    def test_wrong_protocol_version_fails_closed(self):
+        response = {**SUCCESS, "protocol_version": 2}
+        self.assert_fake_response_fails_closed(json.dumps(response))
+
+    def test_unknown_security_fields_fail_closed(self):
+        response = {
+            **SUCCESS,
+            "security": {**SUCCESS["security"], "raw_claim": "untrusted"},
+        }
+        self.assert_fake_response_fails_closed(json.dumps(response))
+
+    def test_missing_required_success_fields_fail_closed(self):
+        missing_metadata = {key: value for key, value in SUCCESS.items() if key != "metadata"}
+        missing_binding = {
+            **SUCCESS,
+            "security": {
+                key: value
+                for key, value in SUCCESS["security"].items()
+                if key != "report_data_binding"
+            },
+        }
+        for response in (missing_metadata, missing_binding):
+            with self.subTest(response=response):
+                self.assert_fake_response_fails_closed(json.dumps(response))
+
+    def test_contradictory_success_and_error_fields_fail_closed(self):
+        response = {
+            **SUCCESS,
+            "error": {
+                "category": "VerificationFailed",
+                "code": "E_VERIFICATION_FAILED",
+                "message": "contradictory",
+            },
+        }
+        self.assert_fake_response_fails_closed(json.dumps(response))
 
     def test_exit_zero_error_document_fails_closed(self):
         failure = {
@@ -86,12 +142,7 @@ class SnpProtocolTests(unittest.TestCase):
             self.verify(adapter_for(source))
 
     def test_nonzero_success_document_fails_closed(self):
-        source = (
-            f"import sys;sys.stdin.buffer.read();sys.stdout.write({json.dumps(json.dumps(SUCCESS))});"
-            "raise SystemExit(1)"
-        )
-        with self.assertRaises(SnpVerificationError):
-            self.verify(adapter_for(source))
+        self.assert_fake_response_fails_closed(json.dumps(SUCCESS), exit_code=1)
 
     def test_nonzero_structured_failure_preserves_source_category(self):
         failure = {
@@ -179,6 +230,18 @@ class ProductionVerifierSelectionTests(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {"APP_ENV": "local", "SNP_VERIFIER_BINARY": sys.executable},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "requires APP_ENV=local"):
+                verify_with_real_or_fixture("report", "", "snp", b"C" * 32)
+
+        with patch.dict(
+            "os.environ",
+            {
+                "APP_ENV": "production",
+                "ALLOW_LOCAL_VERIFIER_OVERRIDE": "1",
+                "SNP_VERIFIER_BINARY": sys.executable,
+            },
             clear=True,
         ):
             with self.assertRaisesRegex(RuntimeError, "requires APP_ENV=local"):
