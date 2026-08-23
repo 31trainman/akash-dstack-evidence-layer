@@ -52,9 +52,14 @@ After capture, run:
 rust-verifier/scripts/validate-snp-fixture.sh
 ```
 
-The fixture is not acceptable for production-readiness claims unless exact
-commitment verification succeeds and a one-bit expected-commitment mutation
-fails through the pinned Trustee evaluator.
+The committed public VCEK makes the fixture's exact-commitment and one-bit
+mutation checks deterministic and offline. The explicit production-readiness
+workflow additionally sends the same report through production
+`verify_request()` with hostile caller certificate text and requires Trustee to
+retrieve and validate the report-specific VCEK through AMD KDS. The protocol-v1
+caller `cert_chain` field is legacy/non-authoritative and is converted to
+`cert_chain: null` before Trustee evaluation. Both the offline and live-KDS
+layers must pass before production readiness can be claimed.
 
 The normal `Build evidence images` workflow validates all non-hardware gates.
 When this fixture is absent, its `SNP production fixture` job is visibly
@@ -63,4 +68,5 @@ A normal green workflow therefore does not establish SNP production readiness.
 
 The separate manually dispatched `SNP production readiness` workflow fails
 closed unless every fixture/provenance file exists, hashes validate, the exact
-commitment succeeds, the one-bit mutation fails, and normal CI also passes.
+commitment succeeds offline, the one-bit mutation fails offline, the production
+AMD KDS parity test passes, and normal CI also passes.

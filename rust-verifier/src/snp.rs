@@ -30,10 +30,7 @@ pub async fn verify_request(
     // The Akash envelope currently does not provide Trustee's typed certificate
     // table. Trustee therefore uses its configured VCEK source and performs the
     // complete chain, signature, TCB, VMPL, and REPORT_DATA verification.
-    let evidence = json!({
-        "attestation_report": report,
-        "cert_chain": null
-    });
+    let evidence = trustee_evidence(&report);
     let snp = Snp::new(None).await.map_err(|_| {
         VerificationError::new(
             ErrorCategory::VerifierUnavailable,
@@ -68,4 +65,56 @@ pub async fn verify_request(
     })?;
 
     Ok(VerificationSuccess::new())
+}
+
+/// Build the only SNP evidence shape accepted by the production trust path.
+/// Protocol-v1 caller certificate text is deliberately not an input: Trustee
+/// must obtain the VCEK from its configured source and validate it against its
+/// pinned AMD certificate authorities.
+pub fn trustee_evidence(report: &AttestationReport) -> serde_json::Value {
+    json!({
+        "attestation_report": report,
+        "cert_chain": null
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse_request;
+
+    fn request(cert_chain: &str) -> Vec<u8> {
+        serde_json::to_vec(&json!({
+            "protocol_version": 1,
+            "evidence_type": "sev-snp",
+            "evidence": {
+                "report_b64": "AA==",
+                "cert_chain": cert_chain,
+            },
+            "expected_workload_commitment_hex": "00".repeat(32),
+            "expected_init_data_hash_hex": null,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn caller_certificate_text_cannot_enter_trustee_evidence() {
+        let benign = parse_request(&request("")).unwrap();
+        let hostile = parse_request(&request(
+            "-----BEGIN CERTIFICATE-----\nattacker-controlled\n-----END CERTIFICATE-----",
+        ))
+        .unwrap();
+        let report = AttestationReport::from_bytes(
+            &B64.decode(include_str!("../tests/fixtures/trustee-test-report.b64").trim())
+                .unwrap(),
+        )
+        .unwrap();
+
+        let benign_evidence = trustee_evidence(&report);
+        let hostile_evidence = trustee_evidence(&report);
+        assert_eq!(benign.evidence.cert_chain, "");
+        assert_ne!(hostile.evidence.cert_chain, benign.evidence.cert_chain);
+        assert_eq!(benign_evidence, hostile_evidence);
+        assert!(benign_evidence["cert_chain"].is_null());
+    }
 }

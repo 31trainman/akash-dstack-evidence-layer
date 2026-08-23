@@ -30,6 +30,7 @@ from verifier.snp_subprocess_adapter import (
 
 IMAGE = "sha256:" + "11" * 32
 CONFIG = "sha256:" + "22" * 32
+OTHER_CONFIG = "sha256:" + "33" * 32
 PUBKEY = b"P" * 32
 POLICY_ID = "akash-dstack-cpu-binding-v1"
 
@@ -49,17 +50,53 @@ class WorkloadPolicyConfigurationTests(unittest.TestCase):
             policy.check("sha256:" + "33" * 32, CONFIG)
 
     def test_config_allowlist_is_optional_and_not_an_authorization_gate(self):
-        other_config = "sha256:" + "33" * 32
         without_configs = load_workload_policy(
             POLICY_ID, policy_json(include_configs=False)
         )
         with_nonmatching_configs = load_workload_policy(
             POLICY_ID, policy_json(configs=[CONFIG])
         )
-        without_configs.check(IMAGE, other_config)
-        with_nonmatching_configs.check(IMAGE, other_config)
+        without_configs.check(IMAGE, OTHER_CONFIG)
+        with_nonmatching_configs.check(IMAGE, OTHER_CONFIG)
         self.assertEqual(without_configs.approved_configs, set())
         self.assertEqual(with_nonmatching_configs.approved_configs, set())
+
+    def test_different_valid_config_changes_workload_commitment(self):
+        self.assertNotEqual(
+            workload_commitment(PUBKEY, IMAGE, CONFIG, b"N" * 32),
+            workload_commitment(PUBKEY, IMAGE, OTHER_CONFIG, b"N" * 32),
+        )
+
+    def test_live_attestation_accepts_and_returns_bound_nonallowlisted_config(self):
+        service_app.store = ChallengeStore(60)
+        record = service_app.store.issue(POLICY_ID)
+        commitment = workload_commitment(PUBKEY, IMAGE, OTHER_CONFIG, record.nonce)
+        submission = AttestationSubmission(
+            challenge_id=record.challenge_id,
+            nonce_b64=base64.b64encode(record.nonce).decode(),
+            workload_pubkey_b64=base64.b64encode(PUBKEY).decode(),
+            image_manifest_digest=IMAGE,
+            config_digest=OTHER_CONFIG,
+            snp_report_b64=base64.b64encode(commitment + b"\x00" * 32).decode(),
+            tee_platform="snp",
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "BRIDGE_API_TOKEN": "test-token",
+                "APP_ENV": "local",
+                "ALLOW_TEST_EVIDENCE": "1",
+                "WORKLOAD_POLICIES_JSON": policy_json(configs=[CONFIG]),
+            },
+            clear=True,
+        ):
+            result = service_app.attest(
+                submission, authorization="Bearer test-token"
+            )
+
+        self.assertTrue(result.verified)
+        self.assertEqual(result.config_digest, OTHER_CONFIG)
+        self.assertEqual(result.commitment_hex, commitment.hex())
 
     def test_missing_malformed_unknown_and_empty_configuration_fail_closed(self):
         cases = [

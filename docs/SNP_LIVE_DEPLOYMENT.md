@@ -25,7 +25,17 @@ Replace the guest-image placeholder in the SDL with the immutable GHCR digest.
 
 For this first hardware-binding experiment, `IMAGE_MANIFEST_DIGEST` can be set to that immutable digest.
 
-`RESOLVED_CONFIG_DIGEST` remains a PoC input until the measured Kata-side hook is live. Do not represent it as trusted workload identity yet.
+`RESOLVED_CONFIG_DIGEST` is syntax-validated, bound into REPORT_DATA through the
+workload commitment, and returned for audit/telemetry. It is not authorized by
+a live configuration allowlist. Measured Init-Data/Kata policy is the intended
+authoritative runtime-configuration control, but
+`expected_init_data_hash_hex` is currently unset and that control is not yet
+implemented.
+
+The protocol-v1 caller `cert_chain` field is legacy and non-authoritative. The
+production Rust verifier discards it when constructing Trustee evidence;
+Trustee retrieves the report-specific VCEK from AMD KDS and validates the AMD
+certificate path.
 
 ## 4. Deploy to the AES SNP+GPU provider
 

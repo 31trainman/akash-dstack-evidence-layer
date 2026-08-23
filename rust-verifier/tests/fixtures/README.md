@@ -11,3 +11,11 @@ cryptographic regression, but pinned Trustee's full evaluator intentionally
 rejects report version 2. It is not current-hardware or production-readiness
 evidence. The separately captured `snp-v3-current` fixture is required for that
 gate and does not exist yet.
+
+When added with operator publication consent, `snp-v3-current/report.bin` and
+`vcek.der` support a deterministic offline Trustee test: the exact fixed
+commitment must pass and a one-bit expected-commitment mutation must fail. The
+explicit production-readiness workflow separately sends that same report
+through production `verify_request()` with hostile caller `cert_chain` text and
+requires Trustee's live AMD KDS certificate source to succeed. Both layers are
+required; KDS failure leaves production readiness unsatisfied.

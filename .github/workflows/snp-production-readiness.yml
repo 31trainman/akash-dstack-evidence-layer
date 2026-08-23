@@ -34,10 +34,20 @@ jobs:
             }
           done
 
-      - name: Verify provenance, hashes, exact binding, and mutation rejection
+      - name: Verify provenance, hashes, offline exact binding, and mutation rejection
         run: rust-verifier/scripts/validate-snp-fixture.sh
+
+      - name: Verify production AMD KDS certificate-source parity
+        env:
+          SNP_FIXTURE_DIR: tests/fixtures/snp-v3-current
+        working-directory: rust-verifier
+        run: |
+          cargo test --locked \
+            --test trustee_current_snp_fixture \
+            production_verify_request_uses_kds_and_ignores_caller_cert_chain \
+            -- --ignored --exact
 
       - name: Record production-readiness result
         run: |
           echo "### SNP production-readiness gate satisfied" >> "${GITHUB_STEP_SUMMARY}"
-          echo "Normal CI and genuine current-fixture validation both passed." >> "${GITHUB_STEP_SUMMARY}"
+          echo "Normal CI, deterministic offline fixture validation, and production AMD KDS parity all passed." >> "${GITHUB_STEP_SUMMARY}"

@@ -18,5 +18,5 @@ test "$(wc -c < "${fixture_dir}/report.bin")" -eq 1184 || {
 SNP_FIXTURE_DIR="${fixture_dir}" cargo test --locked \
   --manifest-path "${manifest}" \
   --test trustee_current_snp_fixture \
-  trustee_current_fixture_exact_commitment_and_mutation \
+  trustee_current_fixture_offline_exact_commitment_and_mutation \
   -- --ignored --exact
