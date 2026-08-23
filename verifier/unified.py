@@ -46,15 +46,23 @@ class UnifiedWorkloadVerifier:
         # 4. GPU is optional, but if required it must verify and bind to same session.
         gpu_verified = False
         gpu_claims = {}
-        if challenge.require_gpu:
-            if bundle.gpu is None:
+        if bundle.gpu is None:
+            if challenge.require_gpu:
                 raise PermissionError("GPU evidence required")
+        else:
             if self.gpu_verifier is None:
                 raise PermissionError("no GPU verifier configured")
 
             gpu = self.gpu_verifier.verify(bundle.gpu)
-            if not gpu.verified:
+            if gpu.verified is not True:
                 raise PermissionError("GPU evidence not verified")
+            if (
+                not isinstance(gpu.challenge_binding, bytes)
+                or len(gpu.challenge_binding) != 32
+            ):
+                raise PermissionError("malformed GPU challenge binding")
+            if not isinstance(gpu.claims, dict):
+                raise PermissionError("malformed GPU claims")
 
             expected_gpu_binding = gpu_session_binding(commitment, bundle.nonce)
             if not secrets.compare_digest(gpu.challenge_binding, expected_gpu_binding):
@@ -62,14 +70,6 @@ class UnifiedWorkloadVerifier:
 
             gpu_verified = True
             gpu_claims = gpu.claims
-        elif bundle.gpu is not None and self.gpu_verifier is not None:
-            # Optional GPU evidence may be checked if supplied, but it does not
-            # upgrade trust unless its session binding also matches.
-            gpu = self.gpu_verifier.verify(bundle.gpu)
-            expected_gpu_binding = gpu_session_binding(commitment, bundle.nonce)
-            if secrets.compare_digest(gpu.challenge_binding, expected_gpu_binding):
-                gpu_verified = True
-                gpu_claims = gpu.claims
 
         # 5. Workload policy is separate from hardware validity.
         self.policy.check(bundle.image_digest, bundle.config_digest)

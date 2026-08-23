@@ -14,6 +14,16 @@ NONCE = b"N"*32
 OLD_NONCE = b"O"*32
 CID = "challenge-1"
 
+class ControlledGpuVerifier:
+    def __init__(self, verified):
+        self.verified = verified
+
+    def verify(self, evidence):
+        evidence.verified = self.verified
+        evidence.claims = {"gpu": "nvidia", "controlled_test": True}
+        return evidence
+
+
 def build_bundle(pubkey=PUBKEY, image=IMAGE, config=CONFIG, nonce=NONCE, gpu=True):
     c = workload_commitment(pubkey, image, config, nonce)
     cpu = CpuEvidence(raw=b"cpu", report_data=c + b"\x00"*32)
@@ -80,6 +90,62 @@ class UnifiedVerifierTests(unittest.TestCase):
         c = Challenge(CID, NONCE, require_gpu=True)
         with self.assertRaises(PermissionError):
             self.v.verify(c, b)
+
+
+class OptionalGpuTrustStateTests(unittest.TestCase):
+    def verifier(self, verified):
+        return UnifiedWorkloadVerifier(
+            StrictMockCpuVerifier(),
+            ControlledGpuVerifier(verified),
+            WorkloadPolicy(approved_images={IMAGE}, approved_configs={CONFIG}),
+        )
+
+    def test_optional_gpu_absent_succeeds_without_gpu_trust(self):
+        challenge = Challenge(CID, NONCE, IMAGE, CONFIG, require_gpu=False)
+        result = self.verifier(True).verify(challenge, build_bundle(gpu=False))
+        self.assertIs(result.gpu_verified, False)
+
+    def test_verified_gpu_with_correct_binding_succeeds(self):
+        challenge = Challenge(CID, NONCE, IMAGE, CONFIG, require_gpu=False)
+        result = self.verifier(True).verify(challenge, build_bundle())
+        self.assertTrue(result.gpu_verified)
+
+    def test_unverified_gpu_with_correct_binding_fails(self):
+        challenge = Challenge(CID, NONCE, IMAGE, CONFIG, require_gpu=False)
+        with self.assertRaises(PermissionError):
+            self.verifier(False).verify(challenge, build_bundle())
+
+    def test_verified_gpu_with_wrong_binding_fails(self):
+        challenge = Challenge(CID, NONCE, IMAGE, CONFIG, require_gpu=False)
+        bundle = build_bundle()
+        bundle.gpu.challenge_binding = b"\xff" * 32
+        with self.assertRaises(PermissionError):
+            self.verifier(True).verify(challenge, bundle)
+
+    def test_unverified_gpu_with_wrong_binding_fails(self):
+        challenge = Challenge(CID, NONCE, IMAGE, CONFIG, require_gpu=False)
+        bundle = build_bundle()
+        bundle.gpu.challenge_binding = b"\xff" * 32
+        with self.assertRaises(PermissionError):
+            self.verifier(False).verify(challenge, bundle)
+
+    def test_required_gpu_missing_fails(self):
+        challenge = Challenge(CID, NONCE, IMAGE, CONFIG, require_gpu=True)
+        with self.assertRaises(PermissionError):
+            self.verifier(True).verify(challenge, build_bundle(gpu=False))
+
+    def test_non_boolean_verified_state_fails(self):
+        challenge = Challenge(CID, NONCE, IMAGE, CONFIG, require_gpu=False)
+        with self.assertRaises(PermissionError):
+            self.verifier("true").verify(challenge, build_bundle())
+
+    def test_malformed_binding_fails(self):
+        challenge = Challenge(CID, NONCE, IMAGE, CONFIG, require_gpu=False)
+        bundle = build_bundle()
+        bundle.gpu.challenge_binding = None
+        with self.assertRaises(PermissionError):
+            self.verifier(True).verify(challenge, bundle)
+
 
 if __name__ == "__main__":
     unittest.main()
