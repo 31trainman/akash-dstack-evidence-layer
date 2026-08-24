@@ -1,8 +1,10 @@
 # Capturing a current SEV-SNP fixture
 
 This tool captures public test evidence; it does not create or modify an SNP
-report. Run it only inside a genuine, non-production SEV-SNP confidential guest
-with Linux `/dev/sev-guest` access and outbound HTTPS access to AMD KDS.
+report. Its default `direct` mode runs inside a genuine, non-production SEV-SNP
+confidential guest with Linux `/dev/sev-guest` access. The additional
+`akash-sidecar` mode obtains the same raw report from Akash's injected local
+attestation sidecar. Both modes require outbound HTTPS access to AMD KDS.
 
 An SNP report exposes a persistent hardware chip ID. Obtain permission from the
 machine operator/provider before capture and publication. Never capture from
@@ -25,6 +27,29 @@ cargo run --locked \
   --operator-consent-file /secure/path/operator-publication-consent.txt \
   --source-revision "$(git rev-parse HEAD)"
 ```
+
+The command above remains the direct `/dev/sev-guest` capture path. Inside an
+Akash confidential workload, use the additional sidecar mode:
+
+```sh
+cargo run --locked \
+  --manifest-path rust-verifier/Cargo.toml \
+  --bin capture_snp_fixture -- \
+  --capture-mode akash-sidecar \
+  --sidecar-url https://127.0.0.1:8790 \
+  --output rust-verifier/tests/fixtures/snp-v3-current \
+  --operator-consent-file /secure/path/operator-publication-consent.txt \
+  --source-revision "$(git rev-parse HEAD)"
+```
+
+Akash mode accepts only HTTPS with the literal loopback hosts `127.0.0.1` or
+`::1`; redirects, remote hosts, DNS names, credentials, and URL paths are
+rejected. It calls `/info` first and requires protocol version 4 and an SNP or
+SNP-GPU platform. It then calls `/quote` with `bind_tls: false` and the exact
+64-byte `commitment32 || zero32` value. The returned report must be an exact
+1,184-byte parseable SNP report. Any returned sidecar `cert_chain` is ignored;
+the trusted VCEK and AMD chain continue to come from independently derived AMD
+KDS URLs.
 
 The consent file is checked but not copied into the repository because it may
 contain operational records. Preserve the approval separately according to the
