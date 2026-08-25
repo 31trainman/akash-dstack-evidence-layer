@@ -1,0 +1,29 @@
+FROM rust:1.89-bookworm AS capture-builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends clang libssl-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build/rust-verifier
+COPY rust-verifier/Cargo.toml rust-verifier/Cargo.lock ./
+COPY rust-verifier/src ./src
+RUN cargo build --release --locked --bin capture_snp_fixture
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && install -d -o 65532 -g 65532 /work
+
+LABEL org.opencontainers.image.source="https://github.com/31trainman/akash-dstack-evidence-layer"
+LABEL org.opencontainers.image.description="Akash SEV-SNP fixture capture tool"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+COPY --from=capture-builder \
+    /build/rust-verifier/target/release/capture_snp_fixture \
+    /usr/local/bin/capture_snp_fixture
+
+USER 65532:65532
+WORKDIR /work
+ENTRYPOINT ["/usr/local/bin/capture_snp_fixture"]

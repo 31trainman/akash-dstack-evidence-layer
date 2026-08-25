@@ -469,6 +469,9 @@ embedded Trustee trust anchors.
 #[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() {
+    if print_version_if_requested() {
+        return;
+    }
     if let Err(error) = linux_capture::run().await {
         eprintln!("capture failed: {error}");
         std::process::exit(1);
@@ -477,6 +480,19 @@ async fn main() {
 
 #[cfg(not(target_os = "linux"))]
 fn main() {
+    if print_version_if_requested() {
+        return;
+    }
     eprintln!("capture requires Linux inside a genuine SEV-SNP guest with /dev/sev-guest or the Akash attestation sidecar");
     std::process::exit(1);
+}
+
+fn print_version_if_requested() -> bool {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().as_deref() == Some(std::ffi::OsStr::new("--version")) && args.next().is_none() {
+        println!("capture_snp_fixture {}", env!("CARGO_PKG_VERSION"));
+        true
+    } else {
+        false
+    }
 }
