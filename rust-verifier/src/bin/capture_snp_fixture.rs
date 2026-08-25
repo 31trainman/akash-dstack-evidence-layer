@@ -134,9 +134,12 @@ mod linux_capture {
         if !url.username().is_empty() || url.password().is_some() {
             return Err("Akash sidecar URL must not contain credentials".into());
         }
-        let host = url.host_str().ok_or("Akash sidecar URL must contain a host")?
+        let serialized_host = url.host_str().ok_or("Akash sidecar URL must contain a host")?;
+        let host = serialized_host.strip_prefix('[').and_then(|host| host.strip_suffix(']'))
+            .unwrap_or(serialized_host)
             .parse::<IpAddr>().map_err(|_| "Akash sidecar host must be a literal loopback IP address")?;
-        if host != IpAddr::V4(Ipv4Addr::LOCALHOST) && host != IpAddr::V6(Ipv6Addr::LOCALHOST) {
+        if !host.is_loopback()
+            || (host != IpAddr::V4(Ipv4Addr::LOCALHOST) && host != IpAddr::V6(Ipv6Addr::LOCALHOST)) {
             return Err("Akash sidecar host must be exactly 127.0.0.1 or ::1".into());
         }
         if url.query().is_some() || url.fragment().is_some() || !matches!(url.path(), "" | "/") {
@@ -409,7 +412,8 @@ embedded Trustee trust anchors.
         #[test]
         fn rejects_remote_and_non_loopback_urls() {
             for url in ["https://example.com:8790", "https://localhost:8790",
-                "https://127.0.0.2:8790", "https://10.0.0.1:8790"] {
+                "https://127.0.0.2:8790", "https://10.0.0.1:8790",
+                "https://[2001:db8::1]:8790"] {
                 assert!(validate_sidecar_url(url).is_err(), "accepted {url}");
             }
             assert!(validate_sidecar_url(DEFAULT_SIDECAR_URL).is_ok());
